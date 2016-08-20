@@ -15,7 +15,7 @@ On arch:
 $ ls -a
 .  ..  .cpcbuild  cpcbuilder  os
 $ cat .cpcbuild
-SRC\_DIR:os
+SRC_DIR:os
 $ ./cpcbuild
 [+] Reading .cpcbuilder file
 [+] Checking config
