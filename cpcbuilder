@@ -1,0 +1,169 @@
+#!/bin/bash
+
+declare -A RULES
+
+ISO_TOOL=mkisofs
+
+# =============================================================================
+# Functions
+# =============================================================================
+# Io
+# -----------------------------------------------------------------------------
+
+function error
+{
+	echo -e "[\033[31m-\033[0m] \033[31mError: $1\033[0m" 1>&2;
+	exit -1
+}
+
+function warning
+{
+	echo -e "[\033[33m!\033[0m] Warning: $1" 1>&2;
+}
+
+function info
+{
+	echo -e "[\033[32m+\033[0m] $1"
+}
+
+function print_help
+{
+	echo "CpcBuilder"
+	echo "=========="
+	echo "This tool generate iso from config file"
+	echo "minimal config should contains this line:"
+	echo "SRC_DIR:os/dir/"
+	echo "----------- help me ? ----------------"
+	***REMOVED***
+	***REMOVED***
+	exit 0
+}
+
+# -----------------------------------------------------------------------------
+# Config
+# -----------------------------------------------------------------------------
+
+function load_config
+{
+	if [[ ! -f "$1" ]]; then
+		error "no such file: $1"
+	fi
+	info "Reading .cpcbuilder file"
+	_file="$(cat "$1")"
+	_last=""
+	for line in $_file; do
+		_rules="$(echo "$line" | grep ':' | cut -d ':' -f 1)"
+		_value="$(echo "$line" | cut -d ':' -f 2)"
+		if [[ $_rules == "" ]]; then
+			RULES["$_last"]="${RULES[$_last]} $_value"
+		else
+			_last="$_rules"
+			RULES["$_rules"]="$_value"
+		fi
+	done
+}
+
+function check_config
+{
+	info "Checking config"
+	if [[ "${RULES[SRC_DIR]}" == "" ]]; then
+		error "SRC_DIR rules is required"
+	fi
+}
+
+# -----------------------------------------------------------------------------
+# Build tools
+# -----------------------------------------------------------------------------
+
+function find_tool
+{
+	info "checking $1"
+	which $1 > /dev/null 2>&1
+	if [[ $? == 0 ]]; then
+		info "$1 was found $(which $1)"
+		return 1
+	fi
+	return 0
+}
+
+function check_build_tool
+{
+	if find_tool "$ISO_TOOL"; then
+		warning "$ISO_TOOL not found checking: genisoimage"
+		if ! find_tool "genisoimage"; then
+			ISO_TOOL=genisoimage
+		else
+			error "No build tools found :<"
+		fi
+	fi
+	if find_tool "wget"; then
+		error "Could find wget :<"
+	fi
+}
+
+# -----------------------------------------------------------------------------
+# setup dev env
+# -----------------------------------------------------------------------------
+
+function clean_old_build
+{
+	if [[ -d "./build" ]]; then
+		info "cleaning old build"
+		rm -rf ./build
+	fi
+}
+
+function setup_devenv
+{
+	clean_old_build
+	mkdir -p ./build/{cdroot/isolinux,tmp}
+	info "Downloading FDOEMCD builder"
+	wget -P ./build/tmp http://www.fdos.org/bootdisks/ISO/FDOEMCD.builder.zip > /dev/null 2>&1
+	info "Unzip FDOEMCD.builder.zip"
+	unzip ./build/tmp/FDOEMCD.builder.zip -d ./build/tmp/ > /dev/null
+	cp -R ./build/tmp/FDOEMCD/CDROOT/* ./build/cdroot
+	cp -R ${RULES[SRC_DIR]}/* ./build/cdroot
+}
+
+function generate_isolinux_cfg
+{
+	info "generate ISOLINUX.CFG"
+	echo "default CD" > ./build/cdroot/isolinux/ISOLINUX.CFG
+	echo "label CD" >> ./build/cdroot/isolinux/ISOLINUX.CFG
+	echo -e "\tkernel memdisk" >> ./build/cdroot/isolinux/ISOLINUX.CFG
+	echo -e "\tappend initrd=BTDSK.IMG" >> ./build/cdroot/isolinux/ISOLINUX.CFG
+	unix2dos ./build/cdroot/isolinux/ISOLINUX.CFG > /dev/null 2>&1
+}
+
+function generate_autorun
+{
+	info "generate AUTORUN.BAT"
+	echo "@ECHO OFF" > ./build/cdroot/AUTORUN.BAT
+	echo "CLS" >> ./build/cdroot/AUTORUN.BAT
+	echo "FDAUTO.BAT" >> ./build/cdroot/AUTORUN.BAT
+	unix2dos ./build/cdroot/AUTORUN.BAT > /dev/null 2>&1
+}
+
+function build_iso
+{
+	$ISO_TOOL -o ./build/cpcdos.iso -b isolinux/isolinux.bin -no-emul-boot -boot-load-size 4 -boot-info-table -N -J -r -c boot.catalog -hide boot.catalog -hide-joliet boot.catalog ./build/cdroot > /dev/null 2>&1
+	info "Build finish: check ./build/cpcdos.iso"
+}
+
+# =============================================================================
+# Main
+# =============================================================================
+
+if [[ $# > 0 ]]; then
+	if [[ $@ =~ "-h" ]] || [[ $@ =~ "--help" ]]; then
+		print_help
+	fi
+fi
+
+load_config ".cpcbuild"
+check_config
+check_build_tool
+setup_devenv
+generate_isolinux_cfg
+generate_autorun
+build_iso
